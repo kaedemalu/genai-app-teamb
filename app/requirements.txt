@@ -1,0 +1,6 @@
+aiohttp
+fastapi
+python-dotenv
+slack_bolt
+uvicorn
+ vertexai
