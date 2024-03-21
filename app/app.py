@@ -252,7 +252,8 @@ def remove_markdown(text):
     return text.replace("[Example]:", "")
 
 
-@app.event("message")
+# @app.event("message")
+@app.event("app_mention")
 def handle_incoming_message(client: AsyncWebClient, payload: dict) -> None:
     """
     受信メッセージを処理する
