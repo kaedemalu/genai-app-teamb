@@ -173,8 +173,10 @@ def process_user_message_and_get_response(
     # 会話の履歴をアップロード
     process_and_upload_chat_history(chat, bucket_name, chat_history_blob_name)
 
-    # レスポンスを辞書形式で返す
-    return {"text": response.text}
+    # # レスポンスを辞書形式で返す
+    # return {"text": response.text}
+
+    return response.text
 
 
 def generate_response_by_vertex_ai_search(
