@@ -206,11 +206,10 @@ def generate_response_by_vertex_ai_search(
         #                               engine_id=engine_id,
         #                               search_query=prompt,
         #                               user_id=user_id)
-
         messages = get_thread_messages(channel_id, conversation_thread)
         response_text = multi_turn_search_sample(
             project_id=project_id,
-            location=vertex_ai_location,
+            location=vertex_ai_search_location,
             data_store_location=data_store_location,
             data_store_id=data_store_id,
             search_queries=messages
@@ -267,6 +266,18 @@ def get_thread_messages(channel_id, thread_ts):
 
     return messages_text_list  # メッセージのテキストリストを返却
 
+# typeがtextのテキストを抽出する関数
+def extract_text_elements(data):
+    texts = []  # 抽出したテキストを保存するリスト
+    if isinstance(data, dict):  # 入力が辞書の場合
+        for value in data.values():
+            texts.extend(extract_text_elements(value))  # 再帰的に探索
+    elif isinstance(data, list):  # 入力がリストの場合
+        for item in data:
+            texts.extend(extract_text_elements(item))  # 再帰的に探索
+    elif isinstance(data, dict) and data.get('type') == 'text':  # textタイプの要素を見つけた場合
+        texts.append(data['text'])  # テキストをリストに追加
+    return texts
 
 def search_sample(
     project_id: str,
