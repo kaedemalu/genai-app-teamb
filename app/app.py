@@ -188,10 +188,6 @@ def generate_response_by_vertex_ai_search(
     """
 
     chat_history_blob_name = f"{base_blob_name}_{user_id}_{conversation_thread}.pkl"
-
-    messages = get_thread_messages(channel_id, conversation_thread)
-    prompt = '。'.join(messages) + '。'
-
     result = generate_text_with_grounding(project_id=project_id,
                                           location=vertex_ai_location,
                                           data_store_location=data_store_location,
@@ -205,18 +201,19 @@ def generate_response_by_vertex_ai_search(
             chat_history_bucket_name, chat_history_blob_name, prompt, model
         )
     else:
-        # response_text = search_sample(project_id=project_id,
-        #                               location=vertex_ai_search_location,
-        #                               engine_id=engine_id,
-        #                               search_query=prompt,
-        #                               user_id=user_id)
-        response_text = multi_turn_search_sample(
-            project_id=project_id,
-            location=vertex_ai_search_location,
-            data_store_location=data_store_location,
-            data_store_id=data_store_id,
-            search_queries=messages
-        )
+        response_text = search_sample(project_id=project_id,
+                                      location=vertex_ai_search_location,
+                                      engine_id=engine_id,
+                                      search_query=prompt,
+                                      user_id=user_id)
+        # messages = get_thread_messages(channel_id, conversation_thread)
+        # response_text = multi_turn_search_sample(
+        #     project_id=project_id,
+        #     location=vertex_ai_search_location,
+        #     data_store_location=data_store_location,
+        #     data_store_id=data_store_id,
+        #     search_queries=messages
+        # )
 
     # レスポンスをslackへ返す
     client.chat_postMessage(channel=channel_id, thread_ts=ts,
