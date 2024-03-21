@@ -243,14 +243,22 @@ def handle_incoming_message(client: AsyncWebClient, payload: dict) -> None:
 
 
 def get_thread_messages(channel_id, thread_ts):
+
+    print(f"channel_id: {channel_id}, thread_ts: {thread_ts}")
+
     messages_text_list = []  # メッセージのテキストを格納するリスト
+
     try:
         # スレッド内のメッセージを取得
         result = slack_client.conversations_replies(
             channel=channel_id, ts=thread_ts)
+        
         messages = result['messages']
 
+        print(f"messages: {messages}")
+
         for msg in messages:
+            print(f"msg: {msg}")
             # ボットからのメッセージを除外してユーザーからのメッセージのみを追加
             if 'bot_id' not in msg:
                 messages_text_list.append(msg['text'])  # メッセージのテキストをリストに追加
