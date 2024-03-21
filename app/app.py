@@ -1,7 +1,7 @@
 import os
 import sys
 from dotenv import load_dotenv
-from fastapi import FastAPI, APIRouter
+from fastapi import FastAPI, APIRouter, Request
 from slack_bolt import App
 from slack_bolt.adapter.fastapi import SlackRequestHandler
 
@@ -64,11 +64,12 @@ async def health():
 # bucket_name = "vertex-ai-conversation-sample-kamiya-history"
 base_blob_name = "chat-history"
 
-# @api.post('/slack/events')
-# async def events(req: Request):
-#     if "x-slack-retry-num" in req.headers:
-#         return
-#     return await app_handler.handle(req)
+
+@api.post('/slack/events')
+async def events(req: Request):
+    if "x-slack-retry-num" in req.headers:
+        return
+    return await app_handler.handle(req)
 
 # VertexAIを初期化
 # vertexai.init(project=project_id, location=vertex_ai_location)
