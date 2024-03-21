@@ -421,16 +421,19 @@ def multi_turn_search_sample(
         response = client.converse_conversation(request)
         response_ = MessageToDict(response._pb)
 
+        # pprint.pprint(response_.keys())
+        # pprint.pprint(response_["reply"]["summary"])
+
         # 要約文取得（HTMLタグを削除）
-        summary = response.summary.summary_text.replace(
+        summary = response_["reply"]["summary"]["summaryText"].replace(
             "<b>", "").replace("</b>", "")
 
         # 関連ファイル取得
         references = []
-        for result in response_["searchResults"][:5]:  # searchResultsの最初の5件を処理
-            data = result["document"]["derivedStructData"]
+        for data in response_["reply"]["summary"]["summaryWithMetadata"]["references"][:5]:  # searchResultsの最初の5件を処理
+            # data = result["document"]["derivedStructData"]
             title = data.get('title', 'タイトルが見つかりません')
-            link = data.get('link', 'リンクが見つかりません')
+            link = data.get('uri', 'リンクが見つかりません')
             references.append({"title": title, "url": link})
 
         # 一つの結果を辞書として構築
