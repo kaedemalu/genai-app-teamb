@@ -188,6 +188,10 @@ def generate_response_by_vertex_ai_search(
     """
 
     chat_history_blob_name = f"{base_blob_name}_{user_id}_{conversation_thread}.pkl"
+
+    messages = get_thread_messages(channel_id, conversation_thread)
+    prompt = '。'.join(messages) + '。'
+
     result = generate_text_with_grounding(project_id=project_id,
                                           location=vertex_ai_location,
                                           data_store_location=data_store_location,
@@ -206,7 +210,6 @@ def generate_response_by_vertex_ai_search(
         #                               engine_id=engine_id,
         #                               search_query=prompt,
         #                               user_id=user_id)
-        messages = get_thread_messages(channel_id, conversation_thread)
         response_text = multi_turn_search_sample(
             project_id=project_id,
             location=vertex_ai_search_location,
@@ -251,7 +254,7 @@ def get_thread_messages(channel_id, thread_ts):
         # スレッド内のメッセージを取得
         result = slack_client.conversations_replies(
             channel=channel_id, ts=thread_ts)
-        
+
         messages = result['messages']
 
         print(f"messages: {messages}")
@@ -267,6 +270,8 @@ def get_thread_messages(channel_id, thread_ts):
     return messages_text_list  # メッセージのテキストリストを返却
 
 # typeがtextのテキストを抽出する関数
+
+
 def extract_text_elements(data):
     texts = []  # 抽出したテキストを保存するリスト
     if isinstance(data, dict):  # 入力が辞書の場合
@@ -278,6 +283,7 @@ def extract_text_elements(data):
     elif isinstance(data, dict) and data.get('type') == 'text':  # textタイプの要素を見つけた場合
         texts.append(data['text'])  # テキストをリストに追加
     return texts
+
 
 def search_sample(
     project_id: str,
@@ -449,7 +455,8 @@ def multi_turn_search_sample(
 
         # 関連ファイル取得
         references = []
-        for data in response_["reply"]["summary"]["summaryWithMetadata"]["references"][:5]:  # searchResultsの最初の5件を処理
+        # searchResultsの最初の5件を処理
+        for data in response_["reply"]["summary"]["summaryWithMetadata"]["references"][:5]:
             # data = result["document"]["derivedStructData"]
             title = data.get('title', 'タイトルが見つかりません')
             link = data.get('uri', 'リンクが見つかりません')
