@@ -20,6 +20,7 @@ from typing import Optional
 from vertexai.preview.generative_models import GenerativeModel
 from typing import Optional
 from google.cloud import bigquery, storage
+from slack_sdk import WebClient
 
 import vertexai
 from vertexai.preview.generative_models import (
@@ -52,6 +53,7 @@ api = FastAPI(
     docs_url="/"
 )
 router = APIRouter()
+slack_client = WebClient(slack_bot_token)
 
 
 @api.get('/health')
@@ -185,7 +187,7 @@ def generate_response_by_vertex_ai_search(
         プロンプト
     """
 
-    chat_history_blob_name = f"{base_blob_name}_{user_id}.pkl"
+    chat_history_blob_name = f"{base_blob_name}_{user_id}_{conversation_thread}.pkl"
     result = generate_text_with_grounding(project_id=project_id,
                                           location=vertex_ai_location,
                                           data_store_location=data_store_location,
@@ -199,11 +201,20 @@ def generate_response_by_vertex_ai_search(
             chat_history_bucket_name, chat_history_blob_name, prompt, model
         )
     else:
-        response_text = search_sample(project_id=project_id,
-                                      location=vertex_ai_search_location,
-                                      engine_id=engine_id,
-                                      search_query=prompt,
-                                      user_id=user_id)
+        # response_text = search_sample(project_id=project_id,
+        #                               location=vertex_ai_search_location,
+        #                               engine_id=engine_id,
+        #                               search_query=prompt,
+        #                               user_id=user_id)
+
+        messages = get_thread_messages(channel_id, conversation_thread)
+        response_text = multi_turn_search_sample(
+            project_id=project_id,
+            location=vertex_ai_location,
+            data_store_location=data_store_location,
+            data_store_id=data_store_id,
+            search_queries=messages
+        )
 
     # レスポンスをslackへ返す
     client.chat_postMessage(channel=channel_id, thread_ts=ts,
@@ -229,6 +240,24 @@ def handle_incoming_message(client: AsyncWebClient, payload: dict) -> None:
     conversation_thread = ts if thread_ts is None else thread_ts
     generate_response_by_vertex_ai_search(client, ts, conversation_thread,
                                           user_id, channel_id, prompt)
+
+
+def get_thread_messages(channel_id, thread_ts):
+    messages_text_list = []  # メッセージのテキストを格納するリスト
+    try:
+        # スレッド内のメッセージを取得
+        result = slack_client.conversations_replies(
+            channel=channel_id, ts=thread_ts)
+        messages = result['messages']
+
+        for msg in messages:
+            # ボットからのメッセージを除外してユーザーからのメッセージのみを追加
+            if 'bot_id' not in msg:
+                messages_text_list.append(msg['text'])  # メッセージのテキストをリストに追加
+    except Exception as e:
+        print(f"エラーが発生しました: {e}")
+
+    return messages_text_list  # メッセージのテキストリストを返却
 
 
 def search_sample(
@@ -340,6 +369,7 @@ def format_slack_message(result):
 def multi_turn_search_sample(
     project_id: str,
     location: str,
+    data_store_location: str,
     data_store_id: str,
     search_queries: List[str],
 ) -> List[discoveryengine.ConverseConversationResponse]:
@@ -363,11 +393,12 @@ def multi_turn_search_sample(
         # The full resource name of the data store
         # e.g. projects/{project_id}/locations/{location}/dataStores/{data_store_id}
         parent=client.data_store_path(
-            project=project_id, location=location, data_store=data_store_id
+            project=project_id, location=data_store_location, data_store=data_store_id
         ),
         conversation=discoveryengine.Conversation(),
     )
 
+    results_list = []  # 最終結果を格納するリスト
     for search_query in search_queries:
         # Add new message to session
         request = discoveryengine.ConverseConversationRequest(
@@ -382,30 +413,41 @@ def multi_turn_search_sample(
             # Options for the returned summary
             summary_spec=discoveryengine.SearchRequest.ContentSearchSpec.SummarySpec(
                 # Number of results to include in summary
-                summary_result_count=5,
+                summary_result_count=3,
                 include_citations=True,
-                model_spec=discoveryengine.SearchRequest.ContentSearchSpec.SummarySpec.ModelSpec(
-                    version="gemini-1.0-pro-001/answer_gen/v1"
-                ),
             ),
         )
+
         response = client.converse_conversation(request)
+        response_ = MessageToDict(response._pb)
 
-        print(f"Reply: {response.reply.summary.summary_text}\n")
+        # 要約文取得（HTMLタグを削除）
+        summary = response.summary.summary_text.replace(
+            "<b>", "").replace("</b>", "")
 
-        for i, result in enumerate(response.search_results, 1):
-            result_data = result.document.derived_struct_data
-            print(f"[{i}]")
-            print(f"Link: {result_data['link']}")
-            print(f"First Snippet: {result_data['snippets'][0]['snippet']}")
-            print(
-                "First Extractive Answer: \n"
-                f"\tPage: {result_data['extractive_answers'][0]['pageNumber']}\n"
-                f"\tContent: {result_data['extractive_answers'][0]['content']}\n\n"
-            )
-            print("\n\n")
+        # 関連ファイル取得
+        references = []
+        for result in response_["searchResults"][:5]:  # searchResultsの最初の5件を処理
+            data = result["document"]["derivedStructData"]
+            title = data.get('title', 'タイトルが見つかりません')
+            link = data.get('link', 'リンクが見つかりません')
+            references.append({"title": title, "url": link})
 
-        return response
+        # 一つの結果を辞書として構築
+        result_dict = {
+            "query": search_query,
+            "summary": summary,
+            "references": references
+        }
+
+        # 結果をリストに追加
+        results_list.append(result_dict)
+        logger.log_struct(result_dict)
+
+    slack_message = format_slack_message(results_list[-1])
+    print(slack_message)
+
+    return slack_message
 
 
 def generate_text_with_grounding(
