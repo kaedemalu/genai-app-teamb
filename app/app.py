@@ -9,6 +9,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 from google.cloud import logging
 import re
 import pickle
+from google.protobuf.json_format import MessageToDict
 
 import vertexai
 from vertexai.language_models import TextGenerationModel
@@ -51,6 +52,8 @@ async def health():
 
 @api.post('/slack/events')
 async def events(req: Request):
+    if "x-slack-retry-num" in req.headers:
+        return
     return await app_handler.handle(req)
 
 # VertexAIを初期化
@@ -141,11 +144,6 @@ def generate_response_by_vertex_ai_search(
     prompt : str
         プロンプト
     """
-    # response = multi_turn_search_sample(project_id=project_id,
-    #                                     location=region,
-    #                                     data_store_id=data_store_id,
-    #                                     search_queries=[prompt])
-
     response = search_sample(project_id=project_id,
                              location=vertex_ai_search_location,
                              engine_id=engine_id,
@@ -270,8 +268,6 @@ def handle_incoming_message(client: AsyncWebClient, payload: dict) -> None:
     ts = payload.get("ts")
     thread_ts = payload.get("thread_ts")
     conversation_thread = ts if thread_ts is None else thread_ts
-    # generate_response(client, ts, conversation_thread,
-    #                   user_id, channel_id, prompt)
     generate_response_by_vertex_ai_search(client, ts, conversation_thread,
                                           user_id, channel_id, prompt)
 
@@ -303,13 +299,13 @@ def search_sample(
         # For information about snippets, refer to:
         # https://cloud.google.com/generative-ai-app-builder/docs/snippets
         snippet_spec=discoveryengine.SearchRequest.ContentSearchSpec.SnippetSpec(
-            return_snippet=True
+            return_snippet=False
         ),
         # For information about search summaries, refer to:
         # https://cloud.google.com/generative-ai-app-builder/docs/get-search-summaries
         summary_spec=discoveryengine.SearchRequest.ContentSearchSpec.SummarySpec(
             summary_result_count=5,
-            include_citations=True,
+            include_citations=False,
             ignore_adversarial_query=True,
             ignore_non_summary_seeking_query=True,
             model_prompt_spec=discoveryengine.SearchRequest.ContentSearchSpec.SummarySpec.ModelPromptSpec(
@@ -337,45 +333,25 @@ def search_sample(
     )
 
     response = client.search(request)
-    print(type(response))
-    print(response)
 
-    print(response.summary.summary_text)
+    # 要約文取得
+    summary = response.summary.summary_text.replace(
+        "<b>", "").replace("</b>", "")
 
-    return response.summary.summary_text
+    # 関連ファイル取得
+    references = []
+    for r in response.results:
+        r_dct = MessageToDict(r._pb)
+        link = r_dct['document']['derivedStructData']['link']
+        references.append(link)
 
-    # # プロトコルバッファメッセージをJSON形式に変換
-    # json_message = json_format.MessageToJson(response)
+    result = {
+        "summary": summary,
+        "references": references
+    }
 
-    # # JSONをPythonの辞書に変換
-    # message_dict = json.loads(json_message)
-
-    # # `summary_with_metadata`の`references`をイテレーティブに処理
-    # for reference in message_dict.get("summary", {}).get("summary_with_metadata", {}).get("references", []):
-    #     title = reference.get("title")
-    #     document = reference.get("document")
-
-    #     # タイトルとドキュメントIDをprint
-    #     print(f"Title: {title}")
-    #     print(f"Document: {document}")
-    #     print("---")  # 見やすさのための区切り
-
-    # for i, result in enumerate(response.summary, 1):
-    #     references = result.summary_with_metadata.references
-    #     print(references)
-    #     # result_data = result.document.derived_struct_data
-    #     # print(result_data)
-    #     # print(f"[{i}]")
-    #     # print(f"Link: {result_data['link']}")
-    #     # print(f"First Snippet: {result_data['snippets'][0]['snippet']}")
-    #     # print(
-    #     #     "First Extractive Answer: \n"
-    #     #     f"\tPage: {result_data['extractive_answers'][0]['pageNumber']}\n"
-    #     #     f"\tContent: {result_data['extractive_answers'][0]['content']}\n\n"
-    #     # )
-    #     print("\n\n")
-
-    # return response
+    logger.log_struct(result)
+    return result
 
 
 def multi_turn_search_sample(
