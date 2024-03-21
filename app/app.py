@@ -343,8 +343,10 @@ def search_sample(
     references = []
     for r in response.results:
         r_dct = MessageToDict(r._pb)
+        title = r_dct['document']['derivedStructData']['title']
         link = r_dct['document']['derivedStructData']['link']
-        references.append(link)
+        reference = {"title": title, "url": link}
+        references.append(reference)
 
     result = {
         "summary": summary,
@@ -352,7 +354,27 @@ def search_sample(
     }
 
     logger.log_struct(result)
-    return result
+
+    slack_message = format_slack_message(result)
+
+    print(slack_message)
+
+    return slack_message
+
+
+def format_slack_message(result):
+    # 要約を太文字にする
+    formatted_summary = f"*{result['summary']}*"
+
+    # 参照をリンク形式にする
+    formatted_references = []
+    for ref in result['references']:
+        formatted_references.append(f"<{ref['url']}|{ref['title']}>")
+
+    # Slackメッセージを組み立てる
+    slack_message = f"{formatted_summary}\n\nReferences:\n" + \
+        "\n".join(formatted_references)
+    return slack_message
 
 
 def multi_turn_search_sample(
