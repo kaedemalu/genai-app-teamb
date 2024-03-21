@@ -7,8 +7,6 @@ from slack_bolt.adapter.fastapi import SlackRequestHandler
 
 from slack_sdk.web.async_client import AsyncWebClient
 from google.cloud import logging
-import re
-import pickle
 from google.protobuf.json_format import MessageToDict
 
 import vertexai
@@ -17,8 +15,6 @@ from typing import List
 
 from google.api_core.client_options import ClientOptions
 from google.cloud import discoveryengine_v1 as discoveryengine
-from google.protobuf import json_format
-import json
 import pprint
 
 load_dotenv()
@@ -113,46 +109,6 @@ def generate_response_by_vertex_ai_search(
                             text=response)
 
 
-# def send_log(logger, user_id: str, prompt: str, payload: str, keyword: str) -> None:
-#     """
-#     ログを送信する
-
-#     Parameters
-#     ----------
-#     user_id : str
-#         ユーザーID
-#     prompt : str
-#         プロンプト
-#     payload : str
-#         ペイロード
-#     """
-
-#     # ログに書き込むデータを持つ辞書を作成する
-#     data = {
-#         "slack_user_id": user_id,
-#         "prompt": prompt,
-#         "response": payload,
-#         "keyword": keyword,
-#     }
-
-#     # 辞書をJSON文字列に変換する
-#     logger.log_struct(data)
-
-
-# def remove_markdown(text):
-#     # インラインコードブロックを削除する
-#     text = re.sub(r"`(.+?)`", r"\1", text)
-#     # マルチラインコードブロックを削除する
-#     text = re.sub(r"```(.+?)```", r"\1", text)
-#     # ボールドマークダウンを削除する
-#     text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
-#     # イタリックマークダウンを削除する
-#     text = re.sub(r"\*(.+?)\*", r"\1", text)
-#     # ヘッダーマークダウンを---で置き換える
-#     text = re.sub(r"^#{1,6}\s*(.+)", r"---\1---", text, flags=re.MULTILINE)
-#     return text.replace("[Example]:", "")
-
-
 # @app.event("message")
 @app.event("app_mention")
 def handle_incoming_message(client: AsyncWebClient, payload: dict) -> None:
@@ -212,9 +168,6 @@ def search_sample(
             include_citations=True,
             ignore_adversarial_query=True,
             ignore_non_summary_seeking_query=True,
-            # model_prompt_spec=discoveryengine.SearchRequest.ContentSearchSpec.SummarySpec.ModelPromptSpec(
-            #     preamble="YOUR_CUSTOM_PROMPT"
-            # ),
             model_spec=discoveryengine.SearchRequest.ContentSearchSpec.SummarySpec.ModelSpec(
                 version="gemini-1.0-pro-001/answer_gen/v1",
                 # version="preview",
@@ -282,23 +235,6 @@ def format_slack_message(result):
         "\n".join(formatted_references)
 
     return slack_message
-
-
-# def format_slack_message(result):
-
-#     # 要約を太文字にする
-#     formatted_summary = f"*{result['summary']}*"
-
-#     # 参照をリンク形式にする
-#     formatted_references = []
-#     for ref in result['references']:
-#         formatted_references.append(f"<{ref['url']}|{ref['title']}>")
-
-#     # Slackメッセージを組み立てる
-#     slack_message = f"{formatted_summary}\n\nReferences:\n" + \
-#         "\n".join(formatted_references)
-
-#     return slack_message
 
 
 def multi_turn_search_sample(
