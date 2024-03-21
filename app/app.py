@@ -71,17 +71,6 @@ async def events(req: Request):
         return
     return await app_handler.handle(req)
 
-# VertexAIを初期化
-# vertexai.init(project=project_id, location=vertex_ai_location)
-
-# text_model = TextGenerationModel.from_pretrained("text-bison")
-# PARAMETERS = {
-#     "max_output_tokens": 1024,
-#     "temperature": 0.20,
-#     "top_p": 0.95,
-#     "top_k": 40,
-# }
-
 generation_config = {
     "temperature": 0.1,
     "top_p": 0.95,
@@ -164,17 +153,11 @@ def process_user_message_and_get_response(
     # チャットモデルの初期化
     chat = model.start_chat(history=chat_history)
 
-    # # ユーザーメッセージから "/chat" を削除
-    # user_message = user_message.replace("/chat", "")
-
     # ユーザーメッセージをモデルに送信し、レスポンスを取得
     response = chat.send_message(user_message)
 
     # 会話の履歴をアップロード
     process_and_upload_chat_history(chat, bucket_name, chat_history_blob_name)
-
-    # # レスポンスを辞書形式で返す
-    # return {"text": response.text}
 
     return response.text
 
@@ -209,7 +192,7 @@ def generate_response_by_vertex_ai_search(
                                           data_store_id=data_store_id,
                                           query=prompt)
 
-    response = None
+    response_text = None
 
     if result == "検索結果なし":
         response_text = process_user_message_and_get_response(
@@ -287,8 +270,7 @@ def search_sample(
             ignore_adversarial_query=True,
             ignore_non_summary_seeking_query=True,
             model_spec=discoveryengine.SearchRequest.ContentSearchSpec.SummarySpec.ModelSpec(
-                version="gemini-1.0-pro-001/answer_gen/v1",
-                # version="preview",
+                version="gemini-1.0-pro-001/answer_gen/v1"
             ),
         )
     )
@@ -400,8 +382,11 @@ def multi_turn_search_sample(
             # Options for the returned summary
             summary_spec=discoveryengine.SearchRequest.ContentSearchSpec.SummarySpec(
                 # Number of results to include in summary
-                summary_result_count=3,
+                summary_result_count=5,
                 include_citations=True,
+                model_spec=discoveryengine.SearchRequest.ContentSearchSpec.SummarySpec.ModelSpec(
+                    version="gemini-1.0-pro-001/answer_gen/v1"
+                ),
             ),
         )
         response = client.converse_conversation(request)
@@ -458,64 +443,3 @@ def generate_text_with_grounding(
     text_value = data['candidates'][0]['content']['parts'][0]['text']
 
     return text_value
-
-    # response_ = MessageToDict(response._pb)
-    # for candidate in response.candidates:
-    #     pprint.pprint(candidate)
-    #     for part in candidate.content.parts:
-    #         pprint.pprint(part.text)
-    #         response.grounding_metadata
-
-    # for candidate in response.grounding_metadata:
-    #     pprint.pprint(candidate)
-    #     for part in candidate.content.parts:
-    #         pprint.pprint(part.text)
-    # pprint.pprint(candidate["parts"])
-    # content = MessageToDict(c._pb)
-    # for c in candidate:
-    #     pprint.pprint(content["parts"].text)
-
-    # print(response)
-
-# def grounding(
-#     project_id: str,
-#     location: str,
-#     data_store_location: Optional[str],
-#     data_store_id: Optional[str],
-#     query: str,
-# ) -> TextGenerationResponse:
-#     """Grounding example with a Large Language Model"""
-
-#     vertexai.init(project=project_id, location=location)
-
-#     # TODO developer - override these parameters as needed:
-#     parameters = {
-#         # Temperature controls the degree of randomness in token selection.
-#         "temperature": 0.7,
-#         # Token limit determines the maximum amount of text output.
-#         "max_output_tokens": 256,
-#         # Tokens are selected from most probable to least until the sum of their probabilities equals the top_p value.
-#         "top_p": 0.8,
-#         # A top_k of 1 means the selected token is the most probable among all tokens.
-#         "top_k": 40,
-#     }
-
-#     # model = TextGenerationModel.from_pretrained("gemini-1.0-pro-001")
-#     model = GenerativeModel("gemini-1.0-pro")
-
-#     if data_store_id and data_store_location:
-#         # Use Vertex AI Search data store
-#         grounding_source = GroundingSource.VertexAISearch(
-#             data_store_id=data_store_id, location=data_store_location
-#         )
-#     else:
-#         # Use Google Search for grounding (Private Preview)
-#         grounding_source = GroundingSource.WebSearch()
-
-#     response = model.generate_content(
-#         query,
-#         grounding_source=grounding_source,
-#         **parameters,
-#     )
-#     print(f"Response from Model: {response.text}")
-#     print(f"Grounding Metadata: {response.grounding_metadata}")
