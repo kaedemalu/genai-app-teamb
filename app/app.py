@@ -19,7 +19,7 @@ import pickle
 from typing import Optional
 from vertexai.preview.generative_models import GenerativeModel
 from typing import Optional
-from google.cloud import bigquery, storage
+from google.cloud import storage
 from slack_sdk import WebClient
 
 import vertexai
@@ -63,7 +63,6 @@ async def health():
     }
     return response
 
-# bucket_name = "vertex-ai-conversation-sample-kamiya-history"
 base_blob_name = "chat-history"
 
 
@@ -188,6 +187,7 @@ def generate_response_by_vertex_ai_search(
     """
 
     chat_history_blob_name = f"{base_blob_name}_{user_id}_{conversation_thread}.pkl"
+
     result = generate_text_with_grounding(project_id=project_id,
                                           location=vertex_ai_location,
                                           data_store_location=data_store_location,
