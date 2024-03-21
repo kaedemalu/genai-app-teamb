@@ -266,22 +266,6 @@ def get_thread_messages(channel_id, thread_ts):
 
     return messages_text_list  # メッセージのテキストリストを返却
 
-# typeがtextのテキストを抽出する関数
-
-
-def extract_text_elements(data):
-    texts = []  # 抽出したテキストを保存するリスト
-    if isinstance(data, dict):  # 入力が辞書の場合
-        for value in data.values():
-            texts.extend(extract_text_elements(value))  # 再帰的に探索
-    elif isinstance(data, list):  # 入力がリストの場合
-        for item in data:
-            texts.extend(extract_text_elements(item))  # 再帰的に探索
-    elif isinstance(data, dict) and data.get('type') == 'text':  # textタイプの要素を見つけた場合
-        texts.append(data['text'])  # テキストをリストに追加
-    return texts
-
-
 def search_sample(
     project_id: str,
     location: str,
@@ -443,9 +427,6 @@ def multi_turn_search_sample(
         response = client.converse_conversation(request)
         response_ = MessageToDict(response._pb)
 
-        # pprint.pprint(response_.keys())
-        # pprint.pprint(response_["reply"]["summary"])
-
         # 要約文取得（HTMLタグを削除）
         summary = response_["reply"]["summary"]["summaryText"].replace(
             "<b>", "").replace("</b>", "")
@@ -454,7 +435,6 @@ def multi_turn_search_sample(
         references = []
         # searchResultsの最初の5件を処理
         for data in response_["reply"]["summary"]["summaryWithMetadata"]["references"][:5]:
-            # data = result["document"]["derivedStructData"]
             title = data.get('title', 'タイトルが見つかりません')
             link = data.get('uri', 'リンクが見つかりません')
             references.append({"title": title, "url": link})
