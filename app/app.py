@@ -1,7 +1,7 @@
 import os
 import sys
 from dotenv import load_dotenv
-from fastapi import FastAPI, APIRouter, Request
+from fastapi import FastAPI, APIRouter
 from slack_bolt import App
 from slack_bolt.adapter.fastapi import SlackRequestHandler
 
@@ -10,23 +10,38 @@ from google.cloud import logging
 from google.protobuf.json_format import MessageToDict
 
 import vertexai
-from vertexai.language_models import TextGenerationModel
 from typing import List
 
 from google.api_core.client_options import ClientOptions
 from google.cloud import discoveryengine_v1 as discoveryengine
 import pprint
+import pickle
+from typing import Optional
+from vertexai.preview.generative_models import GenerativeModel
+from typing import Optional
+from google.cloud import bigquery, storage
+
+import vertexai
+from vertexai.preview.generative_models import (
+    GenerationResponse,
+    GenerativeModel,
+    grounding,
+    Tool,
+)
+
 
 load_dotenv()
 
 try:
     project_id = os.environ['PROJECT_ID']
-    region = os.environ['REGION']
+    vertex_ai_location = os.environ['REGION']
     slack_bot_token = os.environ['SLACK_BOT_TOKEN']
     slack_signing_secret = os.environ['SLACK_SIGNING_SECRET']
     data_store_id = os.environ['DATA_STORE_ID']
+    data_store_location = os.environ['DATA_STORE_LOCATION']
     engine_id = os.environ['ENGINE_ID']
     vertex_ai_search_location = os.environ['VERTEX_AI_SEARCH_LOCATION']
+    chat_history_bucket_name = os.environ['CHAT_HISTORY_BUCKET_NAME']
 
 except KeyError as e:
     sys.exit(f"Environment variable not set: {e}")
@@ -46,23 +61,36 @@ async def health():
     }
     return response
 
+# bucket_name = "vertex-ai-conversation-sample-kamiya-history"
+base_blob_name = "chat-history"
 
-@api.post('/slack/events')
-async def events(req: Request):
-    if "x-slack-retry-num" in req.headers:
-        return
-    return await app_handler.handle(req)
+# @api.post('/slack/events')
+# async def events(req: Request):
+#     if "x-slack-retry-num" in req.headers:
+#         return
+#     return await app_handler.handle(req)
 
 # VertexAIを初期化
-vertexai.init(project=project_id, location=region)
+# vertexai.init(project=project_id, location=vertex_ai_location)
 
-text_model = TextGenerationModel.from_pretrained("text-bison")
-PARAMETERS = {
-    "max_output_tokens": 1024,
-    "temperature": 0.20,
+# text_model = TextGenerationModel.from_pretrained("text-bison")
+# PARAMETERS = {
+#     "max_output_tokens": 1024,
+#     "temperature": 0.20,
+#     "top_p": 0.95,
+#     "top_k": 40,
+# }
+
+generation_config = {
+    "temperature": 0.1,
     "top_p": 0.95,
     "top_k": 40,
+    "candidate_count": 1,
+    "max_output_tokens": 8192,
 }
+
+model = GenerativeModel("gemini-1.0-pro-001",
+                        generation_config=generation_config)
 
 RESPONSE_STYLE = """"""
 
@@ -74,6 +102,78 @@ logger_name = "palm2_slack_chatbot"
 
 # cloud logging: ロガーを選択する
 logger = logging_client.logger(logger_name)
+
+
+def download_blob(bucket_name, source_blob_name):
+    """Downloads a blob from the bucket if it exists, otherwise returns None."""
+    # Google Cloud Storageクライアントを作成
+    storage_client = storage.Client()
+
+    # 指定されたバケットを取得
+    bucket = storage_client.bucket(bucket_name)
+
+    # 指定されたblobを取得
+    blob = bucket.blob(source_blob_name)
+
+    # blobが存在するかどうかをチェック
+    if blob.exists():
+        # 存在する場合、blobの内容をバイトとしてダウンロード
+        serialized_object = blob.download_as_bytes()
+        if serialized_object:
+            # シリアル化された会話のステートを逆シリアル化し、使える形にする
+            return pickle.loads(serialized_object)
+    else:
+        # 存在しない場合、Noneを返す
+        return []
+
+
+def upload_blob(bucket_name, source_file_name, destination_blob_name):
+    """Uploads a file to the bucket."""
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(destination_blob_name)
+
+    blob.upload_from_string(source_file_name)
+
+
+def serialize_to_pickle(python_object):
+    # Serialize the Python object to a pickle
+    serialized_object = pickle.dumps(python_object)
+    return serialized_object
+
+
+def process_and_upload_chat_history(chat, bucket_name, chat_history_blob_name):
+    """チャットの履歴を処理してGCSにアップロードする関数"""
+    # チャットの履歴を取得
+    my_historical_chat = chat.history
+
+    # 会話のステートをシリアル化
+    serialized_chat_state = serialize_to_pickle(my_historical_chat)
+
+    # GCSへアップロード
+    upload_blob(bucket_name, serialized_chat_state, chat_history_blob_name)
+
+
+def process_user_message_and_get_response(
+    bucket_name, chat_history_blob_name, user_message, model
+):
+    # GCS から会話のステートをダウンロード
+    chat_history = download_blob(bucket_name, chat_history_blob_name)
+
+    # チャットモデルの初期化
+    chat = model.start_chat(history=chat_history)
+
+    # # ユーザーメッセージから "/chat" を削除
+    # user_message = user_message.replace("/chat", "")
+
+    # ユーザーメッセージをモデルに送信し、レスポンスを取得
+    response = chat.send_message(user_message)
+
+    # 会話の履歴をアップロード
+    process_and_upload_chat_history(chat, bucket_name, chat_history_blob_name)
+
+    # レスポンスを辞書形式で返す
+    return {"text": response.text}
 
 
 def generate_response_by_vertex_ai_search(
@@ -98,15 +198,30 @@ def generate_response_by_vertex_ai_search(
     prompt : str
         プロンプト
     """
-    response = search_sample(project_id=project_id,
-                             location=vertex_ai_search_location,
-                             engine_id=engine_id,
-                             search_query=prompt,
-                             user_id=user_id)
+
+    chat_history_blob_name = f"{base_blob_name}_{user_id}.pkl"
+    result = generate_text_with_grounding(project_id=project_id,
+                                          location=vertex_ai_location,
+                                          data_store_location=data_store_location,
+                                          data_store_id=data_store_id,
+                                          query=prompt)
+
+    response = None
+
+    if result == "検索結果なし":
+        response_text = process_user_message_and_get_response(
+            chat_history_bucket_name, chat_history_blob_name, prompt, model
+        )
+    else:
+        response_text = search_sample(project_id=project_id,
+                                      location=vertex_ai_search_location,
+                                      engine_id=engine_id,
+                                      search_query=prompt,
+                                      user_id=user_id)
 
     # レスポンスをslackへ返す
     client.chat_postMessage(channel=channel_id, thread_ts=ts,
-                            text=response)
+                            text=response_text)
 
 
 # @app.event("message")
@@ -303,3 +418,101 @@ def multi_turn_search_sample(
             print("\n\n")
 
         return response
+
+
+def generate_text_with_grounding(
+    project_id: str,
+    location: str,
+    data_store_location: Optional[str],
+    data_store_id: Optional[str],
+    query: str,
+) -> GenerationResponse:
+
+    # Initialize Vertex AI
+    vertexai.init(project=project_id, location=location)
+
+    # Load the model
+    model = GenerativeModel(model_name="gemini-1.0-pro")
+    data_store_path = f"projects/{project_id}/locations/{data_store_location}/collections/default_collection/dataStores/{data_store_id}"
+
+    # Create Tool for grounding
+    if data_store_path:
+        # Use Vertex AI Search data store
+        # Format: projects/{project_id}/locations/{location}/collections/default_collection/dataStores/{data_store_id}
+        tool = Tool.from_retrieval(
+            grounding.Retrieval(grounding.VertexAISearch(
+                datastore=data_store_path))
+        )
+    else:
+        # Use Google Search for grounding (Private Preview)
+        tool = Tool.from_google_search_retrieval(
+            grounding.GoogleSearchRetrieval())
+
+    prompt = f"以下の質問に答えてください。わからなければ、「検索結果なし」と答えてください。質問：{query}"
+    response = model.generate_content(prompt, tools=[tool])
+    data = response.to_dict()
+    pprint.pprint(data)
+    text_value = data['candidates'][0]['content']['parts'][0]['text']
+
+    return text_value
+
+    # response_ = MessageToDict(response._pb)
+    # for candidate in response.candidates:
+    #     pprint.pprint(candidate)
+    #     for part in candidate.content.parts:
+    #         pprint.pprint(part.text)
+    #         response.grounding_metadata
+
+    # for candidate in response.grounding_metadata:
+    #     pprint.pprint(candidate)
+    #     for part in candidate.content.parts:
+    #         pprint.pprint(part.text)
+    # pprint.pprint(candidate["parts"])
+    # content = MessageToDict(c._pb)
+    # for c in candidate:
+    #     pprint.pprint(content["parts"].text)
+
+    # print(response)
+
+# def grounding(
+#     project_id: str,
+#     location: str,
+#     data_store_location: Optional[str],
+#     data_store_id: Optional[str],
+#     query: str,
+# ) -> TextGenerationResponse:
+#     """Grounding example with a Large Language Model"""
+
+#     vertexai.init(project=project_id, location=location)
+
+#     # TODO developer - override these parameters as needed:
+#     parameters = {
+#         # Temperature controls the degree of randomness in token selection.
+#         "temperature": 0.7,
+#         # Token limit determines the maximum amount of text output.
+#         "max_output_tokens": 256,
+#         # Tokens are selected from most probable to least until the sum of their probabilities equals the top_p value.
+#         "top_p": 0.8,
+#         # A top_k of 1 means the selected token is the most probable among all tokens.
+#         "top_k": 40,
+#     }
+
+#     # model = TextGenerationModel.from_pretrained("gemini-1.0-pro-001")
+#     model = GenerativeModel("gemini-1.0-pro")
+
+#     if data_store_id and data_store_location:
+#         # Use Vertex AI Search data store
+#         grounding_source = GroundingSource.VertexAISearch(
+#             data_store_id=data_store_id, location=data_store_location
+#         )
+#     else:
+#         # Use Google Search for grounding (Private Preview)
+#         grounding_source = GroundingSource.WebSearch()
+
+#     response = model.generate_content(
+#         query,
+#         grounding_source=grounding_source,
+#         **parameters,
+#     )
+#     print(f"Response from Model: {response.text}")
+#     print(f"Grounding Metadata: {response.grounding_metadata}")
