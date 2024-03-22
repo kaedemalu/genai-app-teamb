@@ -194,7 +194,8 @@ def generate_response_by_vertex_ai_search(
         location=vertex_ai_search_location,
         data_store_location=data_store_location,
         data_store_id=data_store_id,
-        search_queries=messages
+        search_queries=messages,
+        user_id=user_id
     )
 
     if response_text is None:
@@ -202,9 +203,11 @@ def generate_response_by_vertex_ai_search(
             chat_history_bucket_name, chat_history_blob_name, prompt, model
         )
 
-    # レスポンスをslackへ返す
-    client.chat_postMessage(channel=channel_id, thread_ts=ts,
-                            text=response_text)
+    print(response_text)
+    
+    # # レスポンスをslackへ返す
+    # client.chat_postMessage(channel=channel_id, thread_ts=ts,
+    #                         text=response_text)
 
     # result = generate_text_with_grounding(project_id=project_id,
     #                                       location=vertex_ai_location,
@@ -272,13 +275,15 @@ def get_thread_messages(channel_id, thread_ts):
 
         messages = result['messages']
 
-        print(f"messages: {messages}")
+        # print(f"messages: {messages}")
 
         for msg in messages:
-            print(f"msg: {msg}")
+            # pprint.pprint(f"msg: {msg}")
             # ボットからのメッセージを除外してユーザーからのメッセージのみを追加
             if 'bot_id' not in msg:
-                messages_text_list.append(msg['text'])  # メッセージのテキストをリストに追加
+                target = msg['text'].replace("<@U06QL6Y6BUK>", "").strip()
+                # pprint.pprint(f"msg['text']: {target}")
+                messages_text_list.append(target)  # メッセージのテキストをリストに追加
     except Exception as e:
         print(f"エラーが発生しました: {e}")
 
@@ -397,6 +402,7 @@ def multi_turn_search_sample(
     data_store_location: str,
     data_store_id: str,
     search_queries: List[str],
+    user_id: str
 ) -> List[discoveryengine.ConverseConversationResponse]:
 
     #  For more information, refer to:
@@ -420,11 +426,17 @@ def multi_turn_search_sample(
         parent=client.data_store_path(
             project=project_id, location=data_store_location, data_store=data_store_id
         ),
-        conversation=discoveryengine.Conversation(),
+        conversation=discoveryengine.Conversation(user_pseudo_id=user_id),
     )
+
+    print(f"search_queries: {search_queries}")
+    print(f"conversation: {conversation}")
 
     results_list = []  # 最終結果を格納するリスト
     for search_query in search_queries:
+
+        print(f"search_query: {search_query}")
+
         # Add new message to session
         request = discoveryengine.ConverseConversationRequest(
             name=conversation.name,
@@ -451,17 +463,24 @@ def multi_turn_search_sample(
         response = client.converse_conversation(request)
         response_ = MessageToDict(response._pb)
 
-        pprint.pprint(response_)
+        # print(response_)
+        # pprint.pprint(response_["reply"]["summary"].get(
+        #     "summarySkippedReasons", None))
+
+        pprint.pprint(response_["reply"]["summary"])
 
         # 要約文取得（HTMLタグを削除）
-        if response_["reply"]["summary"]["summarySkippedReasons"][0] == "NON_SUMMARY_SEEKING_QUERY_IGNORED":
-            return None
+        if response_["reply"]["summary"].get("summarySkippedReasons", None):
+            print(response_["reply"]["summary"].get("summarySkippedReasons", None))
+            if response_["reply"]["summary"].get("summarySkippedReasons", None)[0] == "NON_SUMMARY_SEEKING_QUERY_IGNORED":
+                return None
 
         summary = response_["reply"]["summary"]["summaryText"].replace(
             "<b>", "").replace("</b>", "")
 
         # 関連ファイル取得
         references = []
+
         # searchResultsの最初の5件を処理
         for data in response_["reply"]["summary"]["summaryWithMetadata"]["references"][:5]:
             title = data.get('title', 'タイトルが見つかりません')
