@@ -1,2 +1,4 @@
 app/deploy.sh
 app/.env
+app/__pycache__/app.cpython-39.pyc
+app/__pycache__/test_app.cpython-39.pyc
